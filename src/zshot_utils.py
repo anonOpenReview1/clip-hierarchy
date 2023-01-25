@@ -23,7 +23,12 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 import re
 import json
+from robustness.tools.helpers import *
+from robustness.tools.breeds_helpers import *
 from torchvision.datasets import ImageFolder
+from collections import defaultdict
+from .constants import *
+
 
 def dataset_with_indices(cls):
     """
@@ -46,7 +51,7 @@ def query_gpt_prompt(prompt):
         model="text-davinci-002",
         prompt=prompt,
         temperature=0.15,
-        max_tokens=256,
+        max_tokens=512,
         top_p=1,
         frequency_penalty=0,
         presence_penalty=0
@@ -60,14 +65,21 @@ def get_CLIP_inputs_from_dict(cl_set_dict, ord_class):
     cl_set_dict: any dict that is of the form {class: [list of class words]}
     ord_class: ORDERED list of classnames that must match dataset
     '''
-    subclasses = [''] * sum([len(v) for k,v in cl_set_dict.items()])
-
+    # tot_subs = 0
+    # subcs = []
+    # for k,v in cl_set_dict.items():
+    #     tot_subs += len(v)
+    #     subcs += v
+    # subclasses = [''] * tot_subs
     counter = 0
     sub_to_super = {}
+    #subcs = set(subcs)
+    subclasses = []
     for idx, cl in enumerate(ord_class):
         subs = cl_set_dict[cl]
         for sub in subs:
-            subclasses[counter] = sub
+            subclasses.append(sub)
+            assert subclasses[counter] == sub
             sub_to_super[counter] = idx
             counter += 1
     
@@ -93,9 +105,12 @@ def get_idir(data_dir, dist):
     return imagenet_dir
 
 
-def query_gpt(word, n=10, temp=0.1):
+def query_gpt(word, n=10, temp=0.1, context=None):
     try:
-        prompt = f"Generate a comma separated list of {n} types of the following:\n\n>{word}:"
+        if context is not None:
+            prompt = f"Generate a comma separated list of {n} types of the following {context}:\n\n>{word}:"
+        else:
+            prompt = f"Generate a comma separated list of {n} types of the following:\n\n>{word}:"
         
         completion = openai.Completion.create(
             model="text-davinci-002",
@@ -114,11 +129,11 @@ def query_gpt(word, n=10, temp=0.1):
         return query_gpt(word, n, temp)
     
 
-def get_cleaned_gpt_sets(sup_classes, n=10, temp=0.1):
+def get_cleaned_gpt_sets(sup_classes, n=10, temp=0.1, context=None):
     out_d = {}
     for cl in sup_classes:
         if out_d.get(cl) is None:
-            out_d[cl] = query_gpt(cl, n=n, temp=temp)
+            out_d[cl] = query_gpt(cl, n=n, temp=temp, context=context)
     new_d = out_d.copy()
     for k, v in out_d.items():
         new_v = []
@@ -190,47 +205,172 @@ def conf_pred(raw_logits, super_logits, raw2super_map):
         raw_probs[:, in_cls] = raw_probs[:, in_cls] * super_probs[:, out_cl].reshape(-1, 1)
     return raw_probs
 
-def run(clip_mod, features, labels, sub2super, breeds_classes, args):
+
+def conf_pred_hat(raw_logits, super_logits, raw2super_map):
+    inv_map = {}
+    for k,v in raw2super_map.items():
+        if inv_map.get(v) is None:
+            inv_map[v] = [k]
+        else:
+            inv_map[v].append(k)
+    
+    for k,v in inv_map.items():
+        inv_map[k] = sorted(v)
+    raw_probs = F.softmax(raw_logits, dim=1)
+    super_probs = F.softmax(super_logits, dim=1)
+    output = torch.zeros_like(raw_probs)
+
+    for out_cl, in_cls in inv_map.items():
+        sub_probs = raw_probs[:, in_cls]
+
+        if len(sub_probs.shape) == 1:
+            sub_probs = sub_probs.reshape(-1, 1)
+        
+        raw_sums = sub_probs.sum(axis=1).reshape(-1, 1)
+
+        raw_probs[:, in_cls] = raw_probs[:, in_cls] * raw_sums
+    return raw_probs
+
+def conf_pred_supagg(raw_logits, super_logits, raw2super_map):
+    inv_map = {}
+    for k,v in raw2super_map.items():
+        if inv_map.get(v) is None:
+            inv_map[v] = [k]
+        else:
+            inv_map[v].append(k)
+    
+    for k,v in inv_map.items():
+        inv_map[k] = sorted(v)
+    raw_probs = F.softmax(raw_logits, dim=1)
+    super_probs = F.softmax(super_logits, dim=1)
+    output = torch.zeros_like(raw_probs)
+    superagg_probs = torch.ones_like(super_probs)
+
+    for out_cl, in_cls in inv_map.items():
+        sub_probs = raw_probs[:, in_cls]
+
+        if len(sub_probs.shape) == 1:
+            sub_probs = sub_probs.reshape(-1, 1)
+        
+
+        raw_sums = sub_probs.sum(axis=1).reshape(-1, 1)
+        superagg_probs[:, out_cl] = super_probs[:, out_cl] * raw_sums.flatten()
+    return superagg_probs
+
+def run(clip_mod, features, labels, sub2super, breeds_classes, indices, args):
     raw_classes, reset_raw_to_super_mapping = get_CLIP_inputs_from_dict(sub2super, breeds_classes)
 
+    if args.reweighter == 'normal':
+        conf_func = conf_pred
+    elif args.reweighter == 'hat':
+        conf_func = conf_pred_hat
+    elif args.reweighter == 'supagg':
+        conf_func = conf_pred_supagg
+    else:
+        raise NotImplementedError
+
+
     if args.superclass_set_ens:
-        clip_mod.text_features = clip_mod.zeroshot_classifier_set_templates(breeds_classes, clip_mod.templates)
+        clip_mod.text_features = clip_mod.zeroshot_classifier_set_templates(breeds_classes, TEMPLATES[USETEMPLATES[args.dataset]])
         super_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
         super_preds = torch.argmax(super_out, dim=1).detach().cpu().numpy()
         super_preds = np.array([clip_mod.temp_map[x] for x in super_preds])
     else:
-        clip_mod.text_features = clip_mod.zeroshot_classifier(breeds_classes, clip_mod.templates)
+        clip_mod.text_features = clip_mod.zeroshot_classifier(breeds_classes, TEMPLATES[USETEMPLATES[args.dataset]])
         super_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
         super_preds = torch.argmax(super_out, dim=1).detach().cpu().numpy()
 
-    if args.experiment in ['true', 'gpt', 'true_noise']:
-        clip_mod.text_features = clip_mod.zeroshot_classifier(raw_classes, clip_mod.templates)
+    if args.experiment in ['true', 'gpt', 'true_noise', 'true_wsup', 'gpt_wosup']:
+        clip_mod.text_features = clip_mod.zeroshot_classifier(raw_classes, TEMPLATES[USETEMPLATES[args.dataset]])
         raw_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
 
-        conf_preds = torch.argmax(conf_pred(raw_out, super_out, reset_raw_to_super_mapping), dim=1).detach().cpu().numpy()
+        conf1_preds = torch.argmax(conf_func(raw_out, super_out, reset_raw_to_super_mapping), dim=1).detach().cpu().numpy()
         raw_preds = torch.argmax(raw_out, dim=1).detach().cpu().numpy()
         raw_preds = np.array([reset_raw_to_super_mapping[x] for x in raw_preds])
-        conf_preds = np.array([reset_raw_to_super_mapping[x] for x in conf_preds])
-
+        if args.reweighter != 'supagg':
+            conf_preds = np.array([reset_raw_to_super_mapping[x] for x in conf1_preds])
+        else:
+            conf_preds = conf1_preds
+        sup_01 = super_preds == labels
+        conf_01 = conf_preds == labels
         out_d = {
             'Superclass': (super_preds == labels).sum() / len(labels),
             'CHiLSNoRW': (raw_preds == labels).sum() / len(labels),
             'CHiLS': (conf_preds == labels).sum() / len(labels)
         }
-        return out_d
+        if args.best_poss:
+            out_d['Best'] = np.logical_or((super_preds == labels), (raw_preds == labels)).sum() / len(labels)
+        preds_d = {}
+        preds_d['both_wrong_idx'] = np.where((sup_01 == 0) & (conf_01 == 0))[0]
+        preds_d['both_right_idx'] = np.where((sup_01 == 1) & (conf_01 == 1))[0]
+        preds_d['chils_wrong_idx'] = np.where((sup_01 == 1) & (conf_01 == 0))[0]
+        preds_d['sup_wrong_idx'] = np.where((sup_01 == 0) & (conf_01 == 1))[0]
+        idx2sup = {i: x for i,x in enumerate(breeds_classes)}
+        preds_d['labels'] = [idx2sup[x] for x in labels]
+        preds_d['super_preds'] = [idx2sup[x] for x in super_preds]
+        preds_d['conf_preds'] = [idx2sup[x] for x in conf_preds]
+        idx2sub = {i:x for i,x in enumerate(raw_classes)}
+        preds_d['conf_subpreds'] = [idx2sub[x] for x in conf1_preds]
+        return out_d, preds_d
     else:
         assert args.experiment in ['true_lin', 'gpt_lin']
         # no confidence prediction, as linear ensembling for subclasses outputs in superclass space
-        clip_mod.text_features = clip_mod.zeroshot_classifier_ens(raw_classes, clip_mod.templates)
+        if args.experiment == 'true_lin':
+            sub2super = {k:v for k,v in sorted(sub2super.items())}
+        clip_mod.text_features = clip_mod.zeroshot_classifier_ens(sub2super.values(), TEMPLATES[USETEMPLATES[args.dataset]])
         raw_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
         raw_preds = torch.argmax(raw_out, dim=1).detach().cpu().numpy()
         out_d = {
             'Superclass': (super_preds == labels).sum() / len(labels),
             'CHiLSNoRW': (raw_preds == labels).sum() / len(labels),
         }
-        return out_d
+        return out_d, {}
 
+def runBestTemplate(clip_mod, features, labels, sub2super, breeds_classes, args):
+    raw_classes, reset_raw_to_super_mapping = get_CLIP_inputs_from_dict(sub2super, breeds_classes)
 
+    templates = ['imagenet']
+    if args.dataset in TEMPLATES:
+        templates.append(args.dataset)
+    out_d = {}
+    for template in templates:
+        if args.superclass_set_ens:
+            clip_mod.text_features = clip_mod.zeroshot_classifier_set_templates(breeds_classes, TEMPLATES[template])
+            super_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
+            super_preds = torch.argmax(super_out, dim=1).detach().cpu().numpy()
+            super_preds = np.array([clip_mod.temp_map[x] for x in super_preds])
+        else:
+            clip_mod.text_features = clip_mod.zeroshot_classifier(breeds_classes, TEMPLATES[template])
+            super_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
+            super_preds = torch.argmax(super_out, dim=1).detach().cpu().numpy()
+
+        if args.experiment in ['true', 'gpt', 'true_noise', 'true_wsup', 'gpt_wosup']:
+            clip_mod.text_features = clip_mod.zeroshot_classifier(raw_classes, TEMPLATES[template])
+            raw_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
+
+            conf_preds = torch.argmax(conf_pred(raw_out, super_out, reset_raw_to_super_mapping), dim=1).detach().cpu().numpy()
+            raw_preds = torch.argmax(raw_out, dim=1).detach().cpu().numpy()
+            raw_preds = np.array([reset_raw_to_super_mapping[x] for x in raw_preds])
+            conf_preds = np.array([reset_raw_to_super_mapping[x] for x in conf_preds])
+
+            temp_d = {
+                'Superclass': (super_preds == labels).sum() / len(labels),
+                'CHiLSNoRW': (raw_preds == labels).sum() / len(labels),
+                'CHiLS': (conf_preds == labels).sum() / len(labels)
+            }
+            out_d[template] = temp_d
+        else:
+            assert args.experiment in ['true_lin', 'gpt_lin']
+            # no confidence prediction, as linear ensembling for subclasses outputs in superclass space
+            clip_mod.text_features = clip_mod.zeroshot_classifier_ens(raw_classes.values(), TEMPLATES[template])
+            raw_out = clip_mod.emb_forward(torch.tensor(features).cuda())['logits']
+            raw_preds = torch.argmax(raw_out, dim=1).detach().cpu().numpy()
+            out_d = {
+                'Superclass': (super_preds == labels).sum() / len(labels),
+                'CHiLSNoRW': (raw_preds == labels).sum() / len(labels),
+            }
+            out_d[template] = temp_d
+    return out_d
 
 
 def find_classes(dir):
@@ -254,8 +394,18 @@ def find_classes(dir):
 
 
 def get_mapping(data_dir, dataset_name, idir): 
-    
-    ret = eval(f"make_{dataset_name}")(data_dir, split='good')
+    DG = BreedsDatasetGenerator(f"{data_dir}/imagenet/imageNet_hierarchy/")
+
+    if 'inet' in dataset_name:
+        ret = DG.get_superclasses(level=int(dataset_name[-1]),
+            Nsubclasses=None,
+            #Nsubclasses=2,
+            ancestor=None,
+            balanced=False
+        )
+        label_mapping = get_label_mapping('custom_imagenet',ret[1][0]) 
+    else:
+        ret = eval(f"make_{dataset_name}")(data_dir + '/imagenet/imageNet_hierarchy/', split='good')
     # if dataset_name.startswith("living17"): 
     #     ret = make_living17(data_dir, split="good")
     # elif dataset_name.startswith("entity13"):
@@ -265,9 +415,9 @@ def get_mapping(data_dir, dataset_name, idir):
     # elif dataset_name.startswith("nonliving26"):
     #     ret = make_nonliving26(data_dir, split="good")
         
-    label_mapping = get_label_mapping('custom_imagenet', np.concatenate((ret[1][0], ret[1][1]), axis=1)) 
+        label_mapping = get_label_mapping('custom_imagenet', np.concatenate((ret[1][0], ret[1][1]), axis=1)) 
 
-    classes, old_class_to_idx = find_classes(imagenet_dir)
+    classes, old_class_to_idx = find_classes(idir)
     classes, new_class_to_idx = label_mapping(classes, old_class_to_idx)
 
     new_map  = defaultdict(lambda : -1)
@@ -277,9 +427,8 @@ def get_mapping(data_dir, dataset_name, idir):
 
     return new_map
 
-def get_idx(dataset_name, y_true, idir): 
-
-    label_map = get_mapping(dataset_name, idir)
+def get_idx(data_dir, dataset_name, y_true, idir): 
+    label_map = get_mapping(data_dir, dataset_name, idir)
 
     labels = label_map.keys()
 
@@ -295,10 +444,11 @@ def transform_labels(label_map, labels):
     return np.array([label_map[i] for i in labels])
 
 
-def prep_data(data, dataset, idir):
-    print(idir)
+def prep_data(data, args, idir):
+    dataset = args.dataset
+    data_dir = args.data_dir
     features, labels, outputs, indices = data["features"], data["labels"], data["outputs"], data["indices"]
-    idx, label_map = get_idx(dataset, labels, idir)
+    idx, label_map = get_idx(data_dir, dataset, labels, idir)
     label_map = {k:v for k,v in sorted(label_map.items(), key=lambda x:(x[1], x[0]))}
     features = features[idx]
     labels = transform_labels(label_map, labels[idx])

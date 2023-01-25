@@ -1,14 +1,14 @@
 import hydra
 import os
 from os.path import join
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from src.train import train
 from src.utils import filter_config, get_dict_hash
 from src.simple_utils import load_pickle, dump_pickle
 
-@hydra.main(config_path="config/", config_name="config.yaml")
-def main(config: DictConfig):
-
+@hydra.main(config_path="config", config_name="config")
+def main(config):
+    print(OmegaConf.to_yaml(config))
     # extract data and model experiment info to group runs
     group_dict = dict(filter_config(config.datamodule), **filter_config(config.models))
     # group_dict["name"] = get_class_name(config.datamodule._target_, "train")

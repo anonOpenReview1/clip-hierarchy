@@ -1,20 +1,24 @@
 import numpy as np
 DATASETS = [
-    'cifar20', 'nonliving26', 'living17', 'entity13', 
-    'entity30', 'lsun-scene', 'fashion1m', 'objectnet', 
-    'food-101', 'fruits360', 'office31', 'officehome', 'fashion-mnist'
+    'cifar20', 'nonliving26', 'living17', 'entity13', 'entity30', 'lsun-scene', 'fashion1M', 'objectnet', 'food-101', 'fruits360', 'office31', 'officehome', 'fashion-mnist', 'eurosat', 'resisc45', 'inet1', 'inet2', 'inet3', 'inet4', 'inet5', 'inet6'
 ]
-TRUESETS = ['nonliving26', 'living17', 'entity13', 'entity30', 'fruits360', 'objectnet']
+TRUESETS = ['nonliving26', 'living17', 'entity13', 'entity30', 'fruits360', 'objectnet', 'cifar20', 'inet1', 'inet2', 'inet3', 'inet4', 'inet5', 'inet6']
 DOMAINS = {
     'nonliving26': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
     'living17': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
     'entity13': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
     'entity30': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
+    'inet1': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
+    'inet2': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
+    'inet3': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
+    'inet4': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
+    'inet5': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
+    'inet6': ['imagenet', 'imagenet-sketch', 'imagenetv2', 'imagenet-c1','imagenet-c2','imagenet-c3','imagenet-c4','imagenet-c5'],
     'office31': ['webcam', 'dslr', 'amazon'],
     'officehome': ['art', 'clipart', 'realworld', 'product']
 }
 MODELS = ['ClipViTL14', 'ClipViTB32', 'ClipViTB16', 'ClipRN50x4', 'ClipRN101', 'ClipRN50']
-EXPERIMENTS = ['true', 'gpt', 'true_noise', 'true_lin', 'gpt_lin']
+EXPERIMENTS = ['true', 'gpt', 'true_noise', 'true_lin', 'gpt_lin', 'true_wsup', 'gpt_wosup']
 
 
 CIFAR20_COARSE = [
@@ -36,6 +40,19 @@ CIFAR20_LABELS = np.array([ 4,  1, 14,  8,  0,  6,  7,  7, 18,  3,
             16, 18,  2,  4,  6, 18,  5,  5,  8, 18,
             18,  1,  2, 15,  6,  0, 17,  8, 14, 13])
 
+
+EUROFILE2NAME = {
+   "Forest": 'forest',
+   "PermanentCrop": 'permanent crop land',
+   'Residential': 'residential buildings or homes or apartments',
+   'River': 'river',
+   'Pasture': 'pasture land',
+   'SeaLake': 'lake or sea',
+   'HerbaceousVegetation': 'brushland or shrubland',
+   'AnnualCrop': 'annual crop land',
+   'Industrial': 'industrial buildings or commercial buildings',
+   'Highway': 'highway or road'
+}
 
 FRUITS360_OG2SUP = {
     'Apple Braeburn': 'apple',
@@ -385,4 +402,194 @@ OBJECTNET_MAP = {
    "beverage, drink, drinkable, potable": [
       "Drinking Cup"
    ]
+}
+
+
+TEMPLATES = {
+   'imagenet': [
+      'a bad photo of a {}.',
+      'a photo of many {}.',
+      'a sculpture of a {}.',
+      'a photo of the hard to see {}.',
+      'a low resolution photo of the {}.',
+      'a rendering of a {}.',
+      'graffiti of a {}.',
+      'a bad photo of the {}.',
+      'a cropped photo of the {}.',
+      'a tattoo of a {}.',
+      'the embroidered {}.',
+      'a photo of a hard to see {}.',
+      'a bright photo of a {}.',
+      'a photo of a clean {}.',
+      'a photo of a dirty {}.',
+      'a dark photo of the {}.',
+      'a drawing of a {}.',
+      'a photo of my {}.',
+      'the plastic {}.',
+      'a photo of the cool {}.',
+      'a close-up photo of a {}.',
+      'a black and white photo of the {}.',
+      'a painting of the {}.',
+      'a painting of a {}.',
+      'a pixelated photo of the {}.',
+      'a sculpture of the {}.',
+      'a bright photo of the {}.',
+      'a cropped photo of a {}.',
+      'a plastic {}.',
+      'a photo of the dirty {}.',
+      'a jpeg corrupted photo of a {}.',
+      'a blurry photo of the {}.',
+      'a photo of the {}.',
+      'a good photo of the {}.',
+      'a rendering of the {}.',
+      'a {} in a video game.',
+      'a photo of one {}.',
+      'a doodle of a {}.',
+      'a close-up photo of the {}.',
+      'a photo of a {}.',
+      'the origami {}.',
+      'the {} in a video game.',
+      'a sketch of a {}.',
+      'a doodle of the {}.',
+      'a origami {}.',
+      'a low resolution photo of a {}.',
+      'the toy {}.',
+      'a rendition of the {}.',
+      'a photo of the clean {}.',
+      'a photo of a large {}.',
+      'a rendition of a {}.',
+      'a photo of a nice {}.',
+      'a photo of a weird {}.',
+      'a blurry photo of a {}.',
+      'a cartoon {}.',
+      'art of a {}.',
+      'a sketch of the {}.',
+      'a embroidered {}.',
+      'a pixelated photo of a {}.',
+      'itap of the {}.',
+      'a jpeg corrupted photo of the {}.',
+      'a good photo of a {}.',
+      'a plushie {}.',
+      'a photo of the nice {}.',
+      'a photo of the small {}.',
+      'a photo of the weird {}.',
+      'the cartoon {}.',
+      'art of the {}.',
+      'a drawing of the {}.',
+      'a photo of the large {}.',
+      'a black and white photo of a {}.',
+      'the plushie {}.',
+      'a dark photo of a {}.',
+      'itap of a {}.',
+      'graffiti of the {}.',
+      'a toy {}.',
+      'itap of my {}.',
+      'a photo of a cool {}.',
+      'a photo of a small {}.',
+      'a tattoo of the {}.',
+   ],
+   'food-101': [
+    'a photo of {}, a type of food.',
+    'a photo of {}, a type of food.'
+   ],
+   'fruits360': [
+      'a photo of {}, a type of fruit.'
+   ],
+   'cifar20': [
+      'a photo of a {}.',
+      'a blurry photo of a {}.',
+      'a black and white photo of a {}.',
+      'a low contrast photo of a {}.',
+      'a high contrast photo of a {}.',
+      'a bad photo of a {}.',
+      'a good photo of a {}.',
+      'a photo of a small {}.',
+      'a photo of a big {}.',
+      'a photo of the {}.',
+      'a blurry photo of the {}.',
+      'a black and white photo of the {}.',
+      'a low contrast photo of the {}.',
+      'a high contrast photo of the {}.',
+      'a bad photo of the {}.',
+      'a good photo of the {}.',
+      'a photo of the small {}.',
+      'a photo of the big {}.',
+   ],
+   'fashion-mnist': [
+      'a black and white photo of {}, an article of clothing.',
+      'a photo of {}, an article of clothing.'
+   ],
+   'fashion1M': [
+      'a photo of {}, an article of clothing.'
+   ],
+   'lsun-scene': [
+    'a photo of a {}.',
+    'a photo of the {}.',
+   ],
+   'office31': [
+      'a photo of {}, a type of office supply.',
+      'a webcam photo of {}, a type of office supply.',
+      'a high quality photo of {}, a type of office supply.',
+   ],
+   'officehome': [
+      'a photo of {}, a type of office supply.',
+      'a drawing of {}, a type of office supply.',
+   ],
+   'eurosat': [
+    'a centered satellite photo of {}.',
+    'a centered satellite photo of a {}.',
+    'a centered satellite photo of the {}.',
+   ],
+   'resisc45': [
+    'satellite imagery of {}.',
+    'aerial imagery of {}.',
+    'satellite photo of {}.',
+    'aerial photo of {}.',
+    'satellite view of {}.',
+    'aerial view of {}.',
+    'satellite imagery of a {}.',
+    'aerial imagery of a {}.',
+    'satellite photo of a {}.',
+    'aerial photo of a {}.',
+    'satellite view of a {}.',
+    'aerial view of a {}.',
+    'satellite imagery of the {}.',
+    'aerial imagery of the {}.',
+    'satellite photo of the {}.',
+    'aerial photo of the {}.',
+    'satellite view of the {}.',
+    'aerial view of the {}.',
+   ]
+}
+
+CONTEXTS = {
+   'office31': 'office supply',
+   'officehome': 'office supply',
+   'fashion1M': 'article of clothing',
+   'fashion-mnist': 'article of clothing',
+   'food-101': 'food',
+   'fruits360': 'fruit'
+}
+USETEMPLATES = {
+   'cifar20': 'imagenet',
+   'nonliving26': 'imagenet',
+   'living17': 'imagenet',
+   'entity13': 'imagenet', 
+   'entity30': 'imagenet', 
+   'inet1': 'imagenet',
+   'inet2': 'imagenet',
+   'inet3': 'imagenet',
+   'inet4': 'imagenet',
+   'inet5': 'imagenet',
+   'inet6': 'imagenet',
+   'lsun-scene': 'imagenet', 
+   'fashion1M': 'fashion1M', 
+   'objectnet': 'imagenet', 
+   'food-101': 'food-101', 
+   'fruits360': 'fruits360', 
+   'office31': 'office31', 
+   'officehome': 'imagenet', 
+   'fashion-mnist': 'imagenet',
+   'eurosat': 'eurosat',
+   'resisc45': 'resisc45'
 }

@@ -1,5 +1,5 @@
 # clip-hierarchy
-Repository for ICLR 2023 Submissions: CHiLS: Zero-shot Image Classification with Hierarchical Label Sets.
+Repository for ICML 2023 Submissions: CHiLS: Zero-shot Image Classification with Hierarchical Label Sets.
 
 There are three main steps for recreating the paper results:
 
